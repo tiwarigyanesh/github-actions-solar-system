@@ -52,6 +52,8 @@
             path: coverage
             retention-days: 5
     docker:
+      permissions: #added
+        packages: write #added
       runs-on: ubuntu-latest
       needs:
         - code-coverage
