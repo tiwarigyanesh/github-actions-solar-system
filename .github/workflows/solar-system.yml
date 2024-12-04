@@ -91,6 +91,13 @@
         #- run: kubectl version --short -o yaml
         - run: kubectl version -o yaml
 
+        # added below to debug connection
+        - name: Debug Connection
+          run: |
+            echo "Current context: $(kubectl config current-context)"
+            kubectl cluster-info
+            kubectl auth can-i get pods --all-namespaces
+
 # Below codes are added to complete the task
         - run: >
             echo "INGRESS_IP=$(kubectl -n ingress-nginx get services
