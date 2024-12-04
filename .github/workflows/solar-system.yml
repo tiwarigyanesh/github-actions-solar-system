@@ -1,30 +1,28 @@
 ---
   name: Solar System Workflow
   on:
-    workflow_dispatch: null
+    workflow_dispatch:
     push:
       branches:
         - main
         - feature/*
+  
   env:
     MONGO_URI: mongodb+srv://supercluster.d83jj.mongodb.net/superData
     MONGO_USERNAME: superuser
     MONGO_PASSWORD: ${{ secrets.MONGO_PASSWORD }}
+  
   jobs:
     unit-testing:
       name: Unit Testing
       runs-on: ubuntu-latest
-      container: #added
-        image: 'node:20' #added
+      container:
+        image: 'node:20'
       steps:
         - name: Checkout Repository
           uses: actions/checkout@v4
-        # - name: Setup NodeJS Version
-        #   uses: actions/setup-node@v4
-        #   with:
-        #     node-version: 20
         - name: Cache NPM dependencies
-          uses: actions/Cache@v4
+          uses: actions/cache@v4
           with:
             path: ~/.npm
             key: ${{ runner.os }}-node-modules-${{ hashFiles('package-lock.json') }}
@@ -38,81 +36,94 @@
           with:
             name: Mocha-Test-Result
             path: test-results.xml
+  
     code-coverage:
       runs-on: ubuntu-latest
       steps:
-        - uses: actions/checkout@v4
-        - uses: actions/setup-node@v4
+        - name: Checkout Repository
+          uses: actions/checkout@v4
+        - name: Setup Node.js
+          uses: actions/setup-node@v4
           with:
             node-version: 18
-        - run: npm install
-        - continue-on-error: true
+        - name: Install Dependencies
+          run: npm install
+        - name: Run Coverage
+          continue-on-error: true
           run: npm run coverage
-        - uses: actions/upload-artifact@v4
+        - name: Upload Coverage Results
+          uses: actions/upload-artifact@v4
           with:
             name: Code-Coverage-Result
             path: coverage
             retention-days: 5
+  
     docker:
-      permissions: #added
-        packages: write #added
+      permissions:
+        packages: write
       runs-on: ubuntu-latest
       needs:
         - code-coverage
         - unit-testing
       steps:
-        - uses: actions/checkout@v4
-        - name: Set lowercase repository owner
-          run: echo "REPO_OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_ENV
-        - uses: docker/login-action@v3
+        - name: Checkout Repository
+          uses: actions/checkout@v4
+        - name: Set Lowercase Repository Owner
+          run: echo "REPO_OWNER_LC=${{ github.repository_owner,, }}" >> $GITHUB_ENV
+        - name: Login to Docker Registry
+          uses: docker/login-action@v3
           with:
             registry: ghcr.io
             username: ${{ github.repository_owner }}
             password: ${{ secrets.GITHUB_TOKEN }}
-        - uses: docker/build-push-action@v4
+        - name: Build and Push Docker Image
+          uses: docker/build-push-action@v4
           with:
             context: .
             push: true
-            tags: ghcr.io/${{ env.REPO_OWNER_LC }}/solar-system:${{ github.sha }}  
+            tags: ghcr.io/${{ env.REPO_OWNER_LC }}/solar-system:${{ github.sha }}
+  
     dev-deploy:
       needs: docker
       runs-on: ubuntu-latest
       environment:
         name: development
       steps:
-        - uses: actions/checkout@v4
-        - uses: azure/setup-kubectl@v3
+        - name: Checkout Repository
+          uses: actions/checkout@v4
+        - name: Setup kubectl
+          uses: azure/setup-kubectl@v3
           with:
             version: v1.26.0
-        - uses: azure/k8s-set-context@v3
+        - name: Set Kubernetes Context
+          uses: azure/k8s-set-context@v3
           with:
             method: kubeconfig
-            kubeconfig: '${{ secrets.KUBECONFIG }}'
-        #- run: kubectl version --short -o yaml
-        #- run: kubectl version -o yaml
-
-        # added below to debug connection
+            kubeconfig: ${{ secrets.KUBECONFIG }}
         - name: Debug Connection
           run: |
             echo "Current context: $(kubectl config current-context)"
             kubectl cluster-info
             kubectl auth can-i get pods --all-namespaces
-
-# Below codes are added to complete the task
-        - run: >
-            echo "INGRESS_IP=$(kubectl -n ingress-nginx get services
-            ingress-nginx-controller -o
-            jsonpath='{.status.loadBalancer.ingress[0].ip}')" >> $GITHUB_ENV
-        - uses: cschleiden/replace-tokens@v1
+        - name: Get Ingress IP
+          run: |
+            echo "INGRESS_IP=$(kubectl -n ingress-nginx get services ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}')" >> $GITHUB_ENV
+        - name: Replace Tokens
+          uses: cschleiden/replace-tokens@v1
           with:
             tokenPrefix: '_{_'
             tokenSuffix: '_}_'
-            files: '["kubernetes/development/*.yaml"]'
+            files: 'kubernetes/development/*.yaml'
           env:
             NAMESPACE: '${{ vars.NAMESPACE }}'
             REPLICAS: '${{ vars.REPLICAS }}'
-            IMAGE: >-
-              ghcr.io/${{ github.repository_owner }}/solar-system:${{ github.sha
-              }}
+            IMAGE: ghcr.io/${{ github.repository_owner }}/solar-system:${{ github.sha }}
             INGRESS_IP: '${{ env.INGRESS_IP }}'
-        - run: cat kubernetes/development/*.yaml        
+        - name: Output YAML Files
+          run: cat kubernetes/development/*.yaml
+  
+    integration-test:
+      needs: dev-deploy
+      uses: ./.github/workflows/reusable-workflow.yml
+      with:
+        ingress-url: ${{ needs.dev-deploy.outputs.APP_INGRESS_URL }}  
