@@ -89,7 +89,7 @@
             method: kubeconfig
             kubeconfig: '${{ secrets.KUBECONFIG }}'
         #- run: kubectl version --short -o yaml
-        - run: kubectl version -o yaml
+        #- run: kubectl version -o yaml
 
         # added below to debug connection
         - name: Debug Connection
